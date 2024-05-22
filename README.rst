@@ -7,11 +7,9 @@ boardgamegeek - A Python API for boardgamegeek.com
 +------------------+-----------------------------------------------------+
 
 
-Development status: **unmaintained**
+Development status:
 
-
-    To everybody sending PRs and issues: thank you for the interest in the project! Unfortunately, as it can be seen from my lack of interaction with you, I don't have the time     or energy to work on it anymore. I don't exclude coming back at some point but as of now it's pretty unlikely. Sorry. If anyone of you would like to continue, 
-    feel free to fork.
+This is a fork lcosmin/boardgamegeek. I'll only correct/develop what I need for my project. I don't intend to mantain this component.
 
 
 

@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools", "setuptools-scm"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "boardgamegeek2"
+version = "1.0.2"
+description = "A Python interface to boardgamegeek.com's API"
+keywords = ["api", "boardgamegeek"]
+license = { text = "BSD" }
+readme = "README.rst"
+classifiers=[
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.2",
+    "Programming Language :: Python :: 3.3",
+    "License :: OSI Approved :: BSD License",
+    "Development Status :: 4 - Beta",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Developers",
+    "Topic :: Games/Entertainment :: Board Games",
+    "Topic :: Internet :: WWW/HTTP :: Dynamic Content",
+]
+authors = [
+    {name = "Cosmin Luță", email = "q4break@gmail.com"},
+]
+requires-python = '>=3.11'
+dependencies = [
+    "requests>=2.0",
+    "requests-cache>=1.0",
+]
+
+[project.urls]
+Repository = "https://github.com/lcosmin/boardgamegeek"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["boardgamegeek"]
+exclude = ["docs", "test"]
