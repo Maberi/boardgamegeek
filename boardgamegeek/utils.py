@@ -10,7 +10,6 @@
 .. moduleauthor:: Cosmin Luță <q4break@gmail.com>
 
 """
-from __future__ import unicode_literals
 import sys
 import xml.etree.ElementTree as ET
 from xml.etree.ElementTree import ParseError as ETParseError
@@ -19,23 +18,9 @@ import logging
 import time
 import threading
 from requests.adapters import HTTPAdapter
-
-
-try:
-    import urllib.parse as urlparse
-except:
-    import urlparse
-
-# Compatibility shim which gives us a working "unescape HTML" function on all Python versions
-try:
-    import html
-    html_unescape = html.unescape # Python 3.4+
-except AttributeError: # Python 3.0 - 3.3
-    import html.parser
-    html_unescape = html.parser.HTMLParser().unescape
-except ImportError: # Python 2
-    import HTMLParser
-    html_unescape = HTMLParser.HTMLParser().unescape
+import urllib.parse as urlparse
+import html
+html_unescape = html.unescape
 
 from .exceptions import BGGApiError, BGGApiRetryError, BGGError, BGGApiTimeoutError, BGGItemNotFoundError
 
@@ -105,6 +90,8 @@ class DictObject(object):
 
     def __getattr__(self, item):
         # allow accessing user's variables using .attribute
+        if item[0] == '_':
+            return
         try:
             return self._data[item]
         except:
@@ -398,7 +385,7 @@ def fix_url(url):
 
 
 def fix_unsigned_negative(value):
-    # the BGG api seems to return negative years casted to unsigned ints (32 bit) in search results. This function
+    # the BGG api seems to return negative years cast to unsigned ints (32 bit) in search results. This function
     # fixes the values so that they're negative again.
     if value > 0x7FFFFFFF:
         value -= 0x100000000

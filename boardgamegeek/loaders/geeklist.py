@@ -21,7 +21,7 @@ def add_geeklist_comments_from_xml(geeklist_or_item, xml_root):
             "thumbs": int(comment.attrib["thumbs"]),
             "text": comment.text.strip()
         }
-        listcomment = geeklist_or_item.add_comment(data)
+        geeklist_or_item.add_comment(data)
         added_comments = True
     return added_comments
 
@@ -37,9 +37,9 @@ def create_geeklist_from_xml(xml_root, listid):
         "username": xml_subelement_text(xml_root, 'username'),
         "description": xml_subelement_text(xml_root, 'description')
     }
-    list = GeekList(data)
-    add_geeklist_comments_from_xml(list, xml_root)
-    return list
+    geeklist = GeekList(data)
+    add_geeklist_comments_from_xml(geeklist, xml_root)
+    return geeklist
 
 
 def add_geeklist_items_from_xml(geeklist, xml_root):

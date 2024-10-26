@@ -1,4 +1,3 @@
-from __future__ import unicode_literals
 import sys
 import argparse
 import logging
@@ -19,9 +18,9 @@ def brief_game_stats(game):
                " / ".join(game.categories).lower(),
                " / ".join(game.mechanics).lower())
 
-        print >>sys.stderr, "{}".format(desc)
+        print("{}".format(desc), file=sys.stderr)
         sys.stdout.flush()
-    except Exception as e:
+    except:
         pass
 
     return
@@ -99,17 +98,17 @@ def main():
 
     # query by game id
     if args.id:
-        game = bgg.game(game_id=args.id, comments=True)
+        game = bgg.game(game_id=args.id, comments=False)
         game._format(log)
 
     # query by game name
     if args.game:
         # fetch the most popular
         if args.most_popular:
-            game = bgg.game(args.game, choose="best-rank", comments=True)
+            game = bgg.game(args.game, choose="best-rank", comments=False)
         else:
         # fetch the most recent one
-            game = bgg.game(args.game, choose="recent", comments=True)
+            game = bgg.game(args.game, choose="recent", comments=False)
         game._format(log)
 
     if args.game_stats:

@@ -48,7 +48,7 @@ class PlayerSuggestion(DictObject):
     @property
     def numeric_player_count(self):
         """
-        Convert player count to a an int
+        Convert player count to an int
         If player count contains a + symbol
         then add one to the player count
         """
@@ -1113,7 +1113,7 @@ class BoardGame(BaseGame):
     @property
     def player_suggestions(self):
         """
-        :return player suggestion list with votes
+        :return: player suggestion list with votes
         :rtype: list of dicts
         """
         return self._player_suggestion

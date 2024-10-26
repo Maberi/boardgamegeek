@@ -117,6 +117,7 @@ class GeekListItem(DictObject):
     """
     def __init__(self, data):
         self._comments = []
+        self._object = None
         super(GeekListItem, self).__init__(data)
 
     def __repr__(self):

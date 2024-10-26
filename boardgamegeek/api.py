@@ -16,8 +16,6 @@ from __future__ import unicode_literals
 
 import datetime
 import logging
-import sys
-import warnings
 
 from .objects.user import User
 from .objects.search import SearchResult
@@ -89,7 +87,10 @@ class BGGRestrictCollectionTo(object):
 
 def call_progress_cb(progress_cb, current, total):
     if progress_cb is not None:
-        progress_cb(current, total)
+        try:
+            progress_cb(current, total)
+        except:
+            pass
 
 
 class BGGCommon(object):
@@ -124,7 +125,103 @@ class BGGCommon(object):
         # add the rate limiting adapter
         self.requests_session.mount(api_endpoint, RateLimitingAdapter(rpm=requests_per_minute))
 
-    def _get_game_id(self, name, game_type, choose):
+    def game(self, name=None, game_id=None, choose:BGGChoose = BGGChoose.FIRST, versions=False, videos=False, historical=False,
+             marketplace=False, comments=False, rating_comments=False, progress=None):
+        """
+        Get information about a game.
+
+        :param str name: If not None, get information about a game with this name
+        :param integer game_id:  If not None, get information about a game with this id
+        :param str choose: method of selecting the game by name, when dealing with multiple results.
+                           Valid values are : "first", "recent" or "best-rank"
+        :param bool versions: include versions information
+        :param bool videos: include videos
+        :param bool historical: include historical data
+        :param bool marketplace: include marketplace data
+        :param bool comments: include comments
+        :param bool rating_comments: only comments with rating (ignored in favor of ``comments``, if that is true)
+        :param callable progress: callable for reporting progress if fetching comments
+        :return: ``BoardGame`` object
+        :rtype: :py:class:`boardgamegeek.games.BoardGame`
+
+        :raises: :py:exc:`boardgamegeek.exceptions.BoardGameGeekError` in case of invalid name or game_id
+        :raises: :py:exc:`boardgamegeek.exceptions.BoardGameGeekAPIRetryError` if this request should be retried after a
+                 short delay
+        :raises: :py:exc:`boardgamegeek.exceptions.BoardGameGeekAPIError` if the response couldn't be parsed
+        :raises: :py:exc:`boardgamegeek.exceptions.BoardGameGeekTimeoutError` if there was a timeout
+        """
+
+        if not name and game_id is None:
+            raise BGGError("game name or id not specified")
+
+        if game_id is None:
+            game_id = self.get_game_id(name, choose=choose)
+            if game_id is None:
+                raise BGGItemNotFoundError
+
+        log.debug("retrieving game id {}{}".format(game_id, " ({})".format(name) if name is not None else ""))
+
+        params = {"id": game_id,
+                  "versions": int(versions),
+                  "videos": int(videos),
+                  "historical": int(historical),
+                  "marketplace": int(marketplace),
+                  "comments": int(comments),
+                  "ratingcomments": int(rating_comments),
+                  "pagesize": 100,
+                  "page": 1,
+                  "stats": 1}
+
+        xml_root = request_and_parse_xml(self.requests_session,
+                                         self._thing_api_url,
+                                         params=params,
+                                         timeout=self._timeout,
+                                         retries=self._retries,
+                                         retry_delay=self._retry_delay)
+
+        xml_root = xml_root.find("item")
+        if xml_root is None:
+            msg = "invalid data for game id: {}{}".format(game_id, "" if name is None else " ({})".format(name))
+            raise BGGApiError(msg)
+
+        game = create_game_from_xml(xml_root,
+                                    game_id=game_id)
+
+        if not (comments or rating_comments):
+            return game
+
+        added_items, total = add_game_comments_from_xml(game, xml_root)
+
+        call_progress_cb(progress, len(game.comments), total)
+
+        page = 1
+        while added_items and len(game.comments) < total:
+            page += 1
+
+            params["page"] = page
+            xml_root = request_and_parse_xml(self.requests_session,
+                                             self._thing_api_url,
+                                             params={"id": game_id,
+                                                     "pagesize": 100,
+                                                     "comments": int(comments),
+                                                     "ratingcomments": int(rating_comments),
+                                                     "page": page},
+                                             timeout=self._timeout,
+                                             retries=self._retries,
+                                             retry_delay=self._retry_delay)
+
+            xml_root = xml_root.find("item")
+            if xml_root is None:
+                msg = "invalid data for game id: {}{}".format(game_id, "" if name is None else " ({})".format(name))
+                raise BGGApiError(msg)
+
+            added_items, total = add_game_comments_from_xml(game, xml_root)
+
+            call_progress_cb(progress, len(game.comments), total)
+
+        return game
+
+    def _get_game_id(self, name, game_type, choose:BGGChoose):
         """
         Returns the BGG ID of a game, searching by name
 
@@ -160,6 +257,22 @@ class BGGCommon(object):
             game_data = [self.game(game_id=r.id) for r in res]
             # ...and selecting the one with the best ranking
             return min(game_data, key=lambda x: x.boardgame_rank if x.boardgame_rank is not None else 10000000000).id
+
+    def get_game_id(self, name, choose:BGGChoose = BGGChoose.FIRST):
+        """
+        Returns the BGG ID of a game, searching by name
+
+        :param str name: The name of the game to search for
+        :param boardgamegeek.BGGChoose choose: method of selecting the game by name, when dealing with multiple results.
+        :return: the game's id
+        :rtype: integer
+        :return: ``None`` if game wasn't found
+        :raises: :py:exc:`boardgamegeek.exceptions.BGGError` in case of invalid name
+        :raises: :py:exc:`boardgamegeek.exceptions.BGGApiRetryError` if this request should be retried after a short delay
+        :raises: :py:exc:`boardgamegeek.exceptions.BGGApiError` if the response couldn't be parsed
+        :raises: :py:exc:`boardgamegeek.exceptions.BGGApiTimeoutError` if there was a timeout
+        """
+        return self._get_game_id(name, game_type=BGGRestrictSearchResultsTo.BOARD_GAME, choose=choose)
 
     def guild(self, guild_id, progress=None, members=True):
         """
@@ -198,10 +311,7 @@ class BGGCommon(object):
         # Add the first page of members
         added_member = add_guild_members_from_xml(guild, xml_root)
 
-        try:
-            call_progress_cb(progress, len(guild), guild.members_count)
-        except:
-            return guild
+        call_progress_cb(progress, len(guild), guild.members_count)
 
         # Fetch the other pages of members
         page = 1
@@ -218,17 +328,14 @@ class BGGCommon(object):
 
             added_member = add_guild_members_from_xml(guild, xml_root)
 
-            try:
-                call_progress_cb(progress, len(guild), guild.members_count)
-            except:
-                break
+            call_progress_cb(progress, len(guild), guild.members_count)
 
         return guild
 
     # TODO: refactor
     def user(self, name, progress=None, buddies=True, guilds=True, hot=True, top=True, domain=BGGRestrictDomainTo.BOARD_GAME):
         """
-        Retrieves details about an user
+        Retrieves details about a user
 
         :param str name: user's login name
         :param callable progress: an optional callable for reporting progress when fetching the buddy list/guilds,
@@ -270,7 +377,7 @@ class BGGCommon(object):
                                      retries=self._retries,
                                      retry_delay=self._retry_delay)
 
-        # when the user is not found, the API returns an response, but with most fields empty. id is empty too
+        # when the user is not found, the API returns a response, but with most fields empty. id is empty too
         try:
             data = {"name": root.attrib["name"],
                     "id": int(root.attrib["id"])}
@@ -328,16 +435,13 @@ class BGGCommon(object):
                                     "id": guild.attrib["id"]})
 
         # It seems that the BGG API can return more results than what's specified in the documentation (they say
-        # page size is 100, but for an user with 114 friends, all buddies are there on the first page).
-        # Therefore, we'll keep fetching pages until we reach the number of items we're expecting or we don't get
+        # page size is 100, but for a user with 114 friends, all buddies are there on the first page).
+        # Therefore, we'll keep fetching pages until we reach the number of items we're expecting, or we don't get
         # any more data
 
         max_items_to_fetch = max(total_buddies, total_guilds)
 
-        try:
-            call_progress_cb(progress, max(user.total_buddies, user.total_guilds), max_items_to_fetch)
-        except:
-            return user
+        call_progress_cb(progress, max(user.total_buddies, user.total_guilds), max_items_to_fetch)
 
         page = 2
         while max(user.total_buddies, user.total_guilds) < max_items_to_fetch:
@@ -359,10 +463,7 @@ class BGGCommon(object):
                                 "id": guild.attrib["id"]})
                 added_guild = True
 
-            try:
-                call_progress_cb(progress, max(user.total_buddies, user.total_guilds), max_items_to_fetch)
-            except:
-                break
+            call_progress_cb(progress, max(user.total_buddies, user.total_guilds), max_items_to_fetch)
 
             page += 1
 
@@ -374,9 +475,9 @@ class BGGCommon(object):
 
     def plays(self, name=None, game_id=None, progress=None, min_date=None, max_date=None, subtype=BGGRestrictPlaysTo.BOARD_GAME):
         """
-        Retrieves the plays for an user (if using ``name``) or for a game (if using ``game_id``)
+        Retrieves the plays for a user (if using ``name``) or for a game (if using ``game_id``)
 
-        :param str name: user name to retrieve the plays for
+        :param str name: username to retrieve the plays for
         :param integer game_id: game id to retrieve the plays for
         :param callable progress: an optional callable for reporting progress, taking two integers (``current``,
                                   ``total``) as arguments
@@ -434,10 +535,7 @@ class BGGCommon(object):
         plays = create_plays_from_xml(xml_root, game_id)
         added_plays = add_plays_from_xml(plays, xml_root)
 
-        try:
-            call_progress_cb(progress, len(plays), plays.plays_count)
-        except:
-            return plays
+        call_progress_cb(progress, len(plays), plays.plays_count)
 
         page = 1
 
@@ -459,10 +557,7 @@ class BGGCommon(object):
 
             added_plays = add_plays_from_xml(plays, xml_root)
 
-            try:
-                call_progress_cb(progress, len(plays), plays.plays_count)
-            except:
-                break
+            call_progress_cb(progress, len(plays), plays.plays_count)
 
         return plays
 
@@ -471,7 +566,7 @@ class BGGCommon(object):
         Return the list of "Hot Items"
 
         :param str item_type: hot item type. Valid values: "boardgame", "rpg", "videogame", "boardgameperson",
-                              "rpgperson", "boardgamecompany", "rpgcompany", "videogamecompany")
+                              "rpgperson", "boardgamecompany", "rpgcompany", "videogamecompany"
         :return: ``HotItems`` object
         :rtype: :py:class:`boardgamegeek.hotitems.HotItems`
         :return: ``None`` in case the hot items couldn't be retrieved
@@ -507,6 +602,8 @@ class BGGCommon(object):
         """
         Returns an user's game collection
 
+        :param max_plays:
+        :param min_plays:
         :param str user_name: user name to retrieve the collection for
         :param str subtype: what type of items to return. One of the constants in :py:class:`boardgamegeek.api.BGGRestrictCollectionTo`
         :param str exclude_subtype: if not ``None`` (default), exclude the specified subtype. Else, one of the constants in :py:class:`boardgamegeek.api.BGGRestrictCollectionTo`
@@ -701,29 +798,30 @@ class BGGCommon(object):
 
 
 class BGGClient(BGGCommon):
+    # noinspection PyUnresolvedReferences
     """
-        Python client for www.boardgamegeek.com's XML API 2.
+            Python client for www.boardgamegeek.com's XML API 2.
 
-        Caching for the requests can be used by specifying an URI for the ``cache`` parameter. By default, an in-memory
-        cache is used, with sqlite being the other currently supported option.
+            Caching for the requests can be used by specifying a URI for the ``cache`` parameter. By default, an in-memory
+            cache is used, with sqlite being the other currently supported option.
 
-        :param :py:class:`boardgamegeek.cache.CacheBackend` cache: An object to be used for caching the requests
-        :param float timeout: Timeout for network operations, in seconds
-        :param int retries: Number of retries to perform in case the API returns HTTP 202 (retry) or in case of timeouts
-        :param float retry_delay: Time to sleep, in seconds, between retries when the API returns HTTP 202 (retry)
-        :param disable_ssl: ignored, left for backwards compatibility
-        :param requests_per_minute: how many requests per minute to allow to go out to BGG (throttle prevention)
+            :param :py:class:`boardgamegeek.cache.CacheBackend` cache: An object to be used for caching the requests
+            :param float timeout: Timeout for network operations, in seconds
+            :param int retries: Number of retries to perform in case the API returns HTTP 202 (retry) or in case of timeouts
+            :param float retry_delay: Time to sleep, in seconds, between retries when the API returns HTTP 202 (retry)
+            :param disable_ssl: ignored, left for backwards compatibility
+            :param requests_per_minute: how many requests per minute to allow to go out to BGG (throttle prevention)
 
-        Example usage::
+            Example usage::
 
-            >>> bgg = BGGClient()
-            >>> game = bgg.game("Android: Netrunner")
-            >>> game.id
-            124742
-            >>> bgg_no_cache = BGGClient(cache=CacheBackendNone())
-            >>> bgg_sqlite_cache = BGGClient(cache=CacheBackendSqlite(path="/path/to/cache.db", ttl=3600))
+                >>> bgg = BGGClient()
+                >>> game = bgg.game("Android: Netrunner")
+                >>> game.id
+                124742
+                >>> bgg_no_cache = BGGClient(cache=CacheBackendNone())
+                >>> bgg_sqlite_cache = BGGClient(cache=CacheBackendSqlite(path="/path/to/cache.db", ttl=3600))
 
-    """
+        """
     def __init__(self, cache=CacheBackendMemory(ttl=3600), timeout=15, retries=3, retry_delay=5, disable_ssl=False, requests_per_minute=DEFAULT_REQUESTS_PER_MINUTE):
 
         super(BGGClient, self).__init__(api_endpoint="https://www.boardgamegeek.com/xmlapi2",
@@ -732,22 +830,6 @@ class BGGClient(BGGCommon):
                                         retries=retries,
                                         retry_delay=retry_delay,
                                         requests_per_minute=requests_per_minute)
-
-    def get_game_id(self, name, choose=BGGChoose.FIRST):
-        """
-        Returns the BGG ID of a game, searching by name
-
-        :param str name: The name of the game to search for
-        :param boardgamegeek.BGGChoose choose: method of selecting the game by name, when dealing with multiple results.
-        :return: the game's id
-        :rtype: integer
-        :return: ``None`` if game wasn't found
-        :raises: :py:exc:`boardgamegeek.exceptions.BGGError` in case of invalid name
-        :raises: :py:exc:`boardgamegeek.exceptions.BGGApiRetryError` if this request should be retried after a short delay
-        :raises: :py:exc:`boardgamegeek.exceptions.BGGApiError` if the response couldn't be parsed
-        :raises: :py:exc:`boardgamegeek.exceptions.BGGApiTimeoutError` if there was a timeout
-        """
-        return self._get_game_id(name, game_type=BGGRestrictSearchResultsTo.BOARD_GAME, choose=choose)
 
     def game_list(self, game_id_list, versions=False,
                   videos=False, historical=False, marketplace=False):
@@ -801,108 +883,6 @@ class BGGClient(BGGCommon):
             game_list.append(game)
 
         return game_list
-
-    def game(self, name=None, game_id=None, choose=BGGChoose.FIRST, versions=False, videos=False, historical=False,
-             marketplace=False, comments=False, rating_comments=False, progress=None):
-        """
-        Get information about a game.
-
-        :param str name: If not None, get information about a game with this name
-        :param integer game_id:  If not None, get information about a game with this id
-        :param str choose: method of selecting the game by name, when dealing with multiple results.
-                           Valid values are : "first", "recent" or "best-rank"
-        :param bool versions: include versions information
-        :param bool videos: include videos
-        :param bool historical: include historical data
-        :param bool marketplace: include marketplace data
-        :param bool comments: include comments
-        :param bool rating_comments: include comments with rating (ignored in favor of ``comments``, if that is true)
-        :param callable progress: callable for reporting progress if fetching comments
-        :return: ``BoardGame`` object
-        :rtype: :py:class:`boardgamegeek.games.BoardGame`
-
-        :raises: :py:exc:`boardgamegeek.exceptions.BoardGameGeekError` in case of invalid name or game_id
-        :raises: :py:exc:`boardgamegeek.exceptions.BoardGameGeekAPIRetryError` if this request should be retried after a
-                 short delay
-        :raises: :py:exc:`boardgamegeek.exceptions.BoardGameGeekAPIError` if the response couldn't be parsed
-        :raises: :py:exc:`boardgamegeek.exceptions.BoardGameGeekTimeoutError` if there was a timeout
-        """
-
-        if not name and game_id is None:
-            raise BGGError("game name or id not specified")
-
-        if game_id is None:
-            game_id = self.get_game_id(name, choose=choose)
-            if game_id is None:
-                raise BGGItemNotFoundError
-
-        log.debug("retrieving game id {}{}".format(game_id, " ({})".format(name) if name is not None else ""))
-
-        params = {"id": game_id,
-                  "versions": int(versions),
-                  "videos": int(videos),
-                  "historical": int(historical),
-                  "marketplace": int(marketplace),
-                  "comments": int(comments),
-                  "ratingcomments": int(rating_comments),
-                  "pagesize": 100,
-                  "page": 1,
-                  "stats": 1}
-
-        xml_root = request_and_parse_xml(self.requests_session,
-                                         self._thing_api_url,
-                                         params=params,
-                                         timeout=self._timeout,
-                                         retries=self._retries,
-                                         retry_delay=self._retry_delay)
-
-        xml_root = xml_root.find("item")
-        if xml_root is None:
-            msg = "invalid data for game id: {}{}".format(game_id, "" if name is None else " ({})".format(name))
-            raise BGGApiError(msg)
-
-        game = create_game_from_xml(xml_root,
-                                    game_id=game_id)
-
-        if not (comments or rating_comments):
-            return game
-
-        added_items, total = add_game_comments_from_xml(game, xml_root)
-
-        try:
-            call_progress_cb(progress, len(game.comments), total)
-        except:
-            return game
-
-        page = 1
-        while added_items and len(game.comments) < total:
-            page += 1
-
-            params["page"] = page
-            xml_root = request_and_parse_xml(self.requests_session,
-                                             self._thing_api_url,
-                                             params={"id": game_id,
-                                                     "pagesize": 100,
-                                                     "comments": int(comments),
-                                                     "ratingcomments": int(rating_comments),
-                                                     "page": page},
-                                             timeout=self._timeout,
-                                             retries=self._retries,
-                                             retry_delay=self._retry_delay)
-
-            xml_root = xml_root.find("item")
-            if xml_root is None:
-                msg = "invalid data for game id: {}{}".format(game_id, "" if name is None else " ({})".format(name))
-                raise BGGApiError(msg)
-
-            added_items, total = add_game_comments_from_xml(game, xml_root)
-
-            try:
-                call_progress_cb(progress, len(game.comments), total)
-            except:
-                break
-
-        return game
 
     def games(self, name):
         """
