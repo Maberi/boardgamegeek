@@ -326,10 +326,10 @@ def request_and_parse_xml(requests_session, url, params=None, timeout=15, retrie
                 # Legacy API returns a 404 when geeklist is not found
                 log.warning("API returned 404, aborting")
                 raise BGGItemNotFoundError("data not found")
-            elif r.status_code == 503:
+            elif r.status_code == 503 or r.status_code == 429:
                 # it seems they added some sort of protection which triggers when too many requests are made, in which
-                # case we get back a 503. Try to delay and retry
-                log.warning("API returned 503, retrying")
+                # case we get back a 503 or 429. Try to delay and retry
+                log.warning(f"API returned {r.status_code}, retrying")
                 if retr >= 0:
                     time.sleep(retry_delay)
                     retry_delay *= 3
