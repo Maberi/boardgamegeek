@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "boardgamegeek2"
-version = "1.0.2"
+version = "1.0.3"
 description = "A Python interface to boardgamegeek.com's API"
 keywords = ["api", "boardgamegeek"]
 license = { text = "BSD" }
