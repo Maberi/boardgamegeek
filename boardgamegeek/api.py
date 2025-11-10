@@ -870,7 +870,7 @@ class BGGClient(BGGCommon):
             access_token: str | None = None):
 
         super().__init__(
-            api_endpoint="https://www.boardgamegeek.com/xmlapi2",
+            api_endpoint="https://boardgamegeek.com/xmlapi2",
             cache=cache,
             timeout=timeout,
             retries=retries,
