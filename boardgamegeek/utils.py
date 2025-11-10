@@ -12,6 +12,7 @@
 """
 import sys
 import xml.etree.ElementTree as ET
+from typing import Any
 from xml.etree.ElementTree import ParseError as ETParseError
 import requests
 import logging
@@ -22,7 +23,8 @@ import urllib.parse as urlparse
 import html
 html_unescape = html.unescape
 
-from .exceptions import BGGApiError, BGGApiRetryError, BGGError, BGGApiTimeoutError, BGGItemNotFoundError
+from .exceptions import BGGApiError, BGGApiRetryError, BGGError, BGGApiTimeoutError, BGGItemNotFoundError, \
+    BGGApiUnauthorizedError
 
 log = logging.getLogger("boardgamegeek.utils")
 
@@ -282,7 +284,15 @@ def xml_subelement_text(xml_elem, subelement, convert=None, default=None, quiet=
     return text
 
 
-def request_and_parse_xml(requests_session, url, params=None, timeout=15, retries=3, retry_delay=5):
+def request_and_parse_xml(
+        requests_session: requests.Session,
+        url: str,
+        params: dict[str, Any] | None = None,
+        timeout: float = 15.0,
+        retries: int = 3,
+        retry_delay: float = 5.0,
+        headers: dict[str, str] | None = None
+    ) -> ET.Element:
     """
     Downloads an XML from the specified url, parses it and returns the xml ElementTree.
 
@@ -292,6 +302,7 @@ def request_and_parse_xml(requests_session, url, params=None, timeout=15, retrie
     :param timeout: number of seconds after which the request times out
     :param retries: number of retries to perform in case of timeout
     :param retry_delay: the amount of seconds to sleep when retrying an API call that returned 202
+    :param headers: dictionary containing the headers which should be sent with the request
     :return: :py:func:`xml.etree.ElementTree` corresponding to the XML
     :raises: :py:class:`BGGApiRetryError` if this request should be retried after a short delay
     :raises: :py:class:`BGGApiError` if the response was invalid or couldn't be parsed
@@ -304,7 +315,7 @@ def request_and_parse_xml(requests_session, url, params=None, timeout=15, retrie
     while retr >= 0:
         retr -= 1
         try:
-            r = requests_session.get(url, params=params, timeout=timeout)
+            r = requests_session.get(url, params=params, timeout=timeout, headers=headers)
 
             if r.status_code == 202:
                 if retries == 0:
@@ -322,6 +333,10 @@ def request_and_parse_xml(requests_session, url, params=None, timeout=15, retrie
                         time.sleep(retry_delay)
                         retry_delay *= 1.5
                     continue
+            elif r.status_code == 401:
+                # Unauthorized - probably invalid access token
+                log.warning("API returned 401, aborting")
+                raise BGGApiUnauthorizedError("invalid access token")
             elif r.status_code == 404:
                 # Legacy API returns a 404 when geeklist is not found
                 log.warning("API returned 404, aborting")
@@ -340,11 +355,7 @@ def request_and_parse_xml(requests_session, url, params=None, timeout=15, retrie
 
             xml = r.text
 
-            if sys.version_info >= (3,):
-                root_elem = ET.fromstring(xml)
-            else:
-                utf8_xml = xml.encode("utf-8")
-                root_elem = ET.fromstring(utf8_xml)
+            root_elem = ET.fromstring(xml)
 
             return root_elem
 
@@ -362,7 +373,7 @@ def request_and_parse_xml(requests_session, url, params=None, timeout=15, retrie
         except ETParseError as e:
             raise BGGApiError("error decoding BGG API response: {}".format(e))
 
-        except (BGGApiRetryError, BGGApiTimeoutError, BGGItemNotFoundError):
+        except (BGGApiRetryError, BGGApiTimeoutError, BGGItemNotFoundError, BGGApiUnauthorizedError):
             raise
 
         except Exception as e:

@@ -25,6 +25,11 @@ class BGGItemNotFoundError(BGGError):
     pass
 
 
+class BGGApiUnauthorizedError(BGGError):
+    """ Unauthorized access """
+    pass
+
+
 class BGGApiTimeoutError(BGGError):
     """ Network timeout conditions """
     pass
