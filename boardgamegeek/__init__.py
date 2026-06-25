@@ -18,6 +18,6 @@ __all__ = ["BGGClient", "BGGChoose", "BGGRestrictSearchResultsTo", "BGGRestrictP
            "BGGApiTimeoutError", "BGGItemNotFoundError", "CacheBackendNone", "CacheBackendSqlite", "CacheBackendMemory"]
 __all__.extend(["BGGClientLegacy"])
 
-__import__('pkg_resources').declare_namespace(__name__)
+#__import__('pkg_resources').declare_namespace(__name__)
 
 
